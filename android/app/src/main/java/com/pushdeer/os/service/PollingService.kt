@@ -34,9 +34,16 @@ class PollingService : Service() {
     companion object {
         private const val TAG = "PollingService"
         private const val SERVICE_NOTIFICATION_ID = 1001
-        private const val MESSAGE_NOTIFICATION_ID = 1002
         private const val FAILURE_REMIND_NOTIFICATION_ID = 1003
         private const val SERVICE_CHANNEL_ID = "polling_service"
+
+        // 每条消息用独立通知 ID，避免后到的把先到的顶掉（只留最新一条）
+        // 基准值避开上面三个固定 ID，取模防止极端情况下溢出
+        private const val MESSAGE_NOTIFICATION_ID_BASE = 2000
+        private const val MESSAGE_NOTIFICATION_ID_RANGE = 100_000
+
+        // 同组通知，系统会把多条折叠成一堆显示，点开展开
+        private const val MESSAGE_GROUP_KEY = "pushdeer_messages"
 
         // 失败提醒的检查节拍（60 秒一次，与轮询间隔无关，保证提醒按小时准点）
         private const val FAILURE_CHECK_INTERVAL_MS = 60_000L
@@ -275,11 +282,17 @@ class PollingService : Service() {
         val notification = Notification.Builder(this, NotificationUtil.HIGH_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(content)
+            .setStyle(Notification.BigTextStyle().bigText(content ?: title))
+            .setGroup(MESSAGE_GROUP_KEY)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
-        nm.notify(MESSAGE_NOTIFICATION_ID, notification)
+        // 每条消息一个独立的通知 ID：连续收到多条时通知栏会并排显示，
+        // 而不是互相覆盖只剩最后一条
+        val notificationId = MESSAGE_NOTIFICATION_ID_BASE +
+            (message.id % MESSAGE_NOTIFICATION_ID_RANGE)
+        nm.notify(notificationId, notification)
     }
 
     private fun createServiceChannel() {

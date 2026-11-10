@@ -62,7 +62,9 @@ fun SettingPage(requestHolder: RequestHolder) {
         }
 
         LazyColumn(
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
+            // 底部导航栏是覆盖在内容上的，留出 80dp 才能把最后一项滑到导航栏上方
+            contentPadding = PaddingValues(bottom = 80.dp)
         ) {
             item {
                 Card(

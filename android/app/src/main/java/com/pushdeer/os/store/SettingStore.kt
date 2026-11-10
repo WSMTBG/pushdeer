@@ -48,4 +48,8 @@ class SettingStore(context: Context) {
 
     // 触发失败状态的那条消息摘要（用于提醒通知正文）
     var failureMessage by store.string("failure-message", "")
+
+    // 诊断：最近一次轮询成功的时间 / 最近一次失败原因，设置页底部展示
+    var lastPollAt by store.long("last-poll-at", 0L)
+    var lastPollError by store.string("last-poll-error", "")
 }

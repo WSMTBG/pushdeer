@@ -1,7 +1,11 @@
 package com.pushdeer.os.ui.compose.page.main
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import android.util.Log
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.*
@@ -31,6 +35,9 @@ import com.pushdeer.os.ui.theme.MBlue
 import com.pushdeer.os.ui.theme.MainBlue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @ExperimentalMaterialApi
 @Composable
@@ -346,6 +353,27 @@ fun SettingPage(requestHolder: RequestHolder) {
                                 )
                             }
 
+                            // 电池优化豁免：Doze 会掐断夜间网络，导致半夜的推送早上才出现
+                            Spacer(modifier = Modifier.height(8.dp))
+                            val batteryCtx = requestHolder.myActivity
+                            val ignoring = isIgnoringBatteryOptimizations(batteryCtx)
+                            SettingChoiceRow(
+                                text = if (ignoring) {
+                                    "电池优化：已忽略（推荐）"
+                                } else {
+                                    "电池优化：未忽略 · 点击去设置"
+                                }
+                            ) {
+                                openBatteryOptimizationSettings(batteryCtx)
+                            }
+
+                            Text(
+                                text = "「未忽略」时系统会在夜间进入 Doze，切断后台网络，导致推送要等解锁手机后才补上。允许忽略电池优化后不再受限制。",
+                                fontSize = 13.sp,
+                                color = Color(0xFF888888),
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp)
+                            )
+
                             Text(
                                 text = "收到含「失败」「失效」的推送后，按上面的间隔重复提醒；收到含「成功」的推送自动停止。",
                                 fontSize = 14.sp,
@@ -359,6 +387,23 @@ fun SettingPage(requestHolder: RequestHolder) {
 
             item {
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // 诊断信息：上次轮询时间 / 最近一次失败原因（判断是否被 Doze 冻住）
+            item {
+                Text(
+                    text = buildPollStatusText(
+                        requestHolder.settingStore.lastPollAt,
+                        requestHolder.settingStore.lastPollError
+                    ),
+                    fontSize = 13.sp,
+                    color = Color(0xFF888888),
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                )
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
             // ===== 原版条目：喜欢 PushDeer 吗 / LogDog 移到底部 =====
@@ -390,6 +435,60 @@ fun SettingPage(requestHolder: RequestHolder) {
             }
         }
     }
+}
+
+/**
+ * 当前 App 是否已被排除在电池优化之外（M 以下没有 Doze，视为已忽略）。
+ */
+private fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+    return try {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        pm.isIgnoringBatteryOptimizations(context.packageName)
+    } catch (e: Exception) {
+        false
+    }
+}
+
+/**
+ * 打开"是否允许忽略电池优化"的系统弹窗；个别 ROM 没有直达入口时退回电池优化列表。
+ */
+private fun openBatteryOptimizationSettings(context: Context) {
+    try {
+        val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            .setData(Uri.parse("package:${context.packageName}"))
+        direct.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(direct)
+        return
+    } catch (e: Exception) {
+        Log.d("WH_", "direct battery dialog failed: ${e.localizedMessage}")
+    }
+    try {
+        val list = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+        list.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(list)
+    } catch (e: Exception) {
+        Log.d("WH_", "battery settings list failed: ${e.localizedMessage}")
+    }
+}
+
+/**
+ * 底部诊断文字：上次轮询时间 + 距今多久 + 最近一次失败原因。
+ */
+private fun buildPollStatusText(lastAt: Long, error: String): String {
+    if (lastAt <= 0L) {
+        return if (error.isEmpty()) "上次轮询：暂无记录" else "上次轮询失败：$error"
+    }
+    val time = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(lastAt))
+    val minutes = ((System.currentTimeMillis() - lastAt) / 60_000L).coerceAtLeast(0L)
+    val ago = when {
+        minutes < 1 -> "刚刚"
+        minutes < 60 -> "$minutes 分钟前"
+        minutes < 24 * 60 -> "${minutes / 60} 小时前"
+        else -> "${minutes / (24 * 60)} 天前"
+    }
+    val tail = if (error.isEmpty()) "状态正常" else "最近失败：$error"
+    return "上次轮询：$time（$ago）· $tail"
 }
 
 /**

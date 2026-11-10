@@ -96,7 +96,8 @@ class PollingService : Service() {
                 try {
                     poll()
                 } catch (e: Exception) {
-                    // 网络异常静默，下一轮再试
+                    // 网络异常静默，下一轮再试；把原因记下来，设置页底部可见
+                    settingStore.lastPollError = e.localizedMessage ?: e.javaClass.simpleName
                 }
             }
         }
@@ -124,12 +125,16 @@ class PollingService : Service() {
         if (resp.code != 0) {
             // 业务错误（如 token 失效）：连续 3 次判定登录失效
             consecutiveFailures++
+            settingStore.lastPollError = "接口返回 code=${resp.code}"
             if (consecutiveFailures >= 3) {
                 handleInvalidToken(token)
             }
             return
         }
         consecutiveFailures = 0
+        // 记一次成功的轮询时间，设置页底部会显示"上次轮询：x 分钟前"
+        settingStore.lastPollAt = System.currentTimeMillis()
+        settingStore.lastPollError = ""
         val messages = resp.content?.messages ?: return
         if (messages.isEmpty()) return
 

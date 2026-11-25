@@ -154,20 +154,60 @@ class PollingService : Service() {
      * 关键字驱动的失败提醒状态机：
      * - 命中「失败」「失效」→ 进入（或刷新）失败状态，从此刻开始计时
      * - 命中「成功」→ 退出失败状态，停止后续提醒
-     * 状态存进 SettingStore，进程被杀重启后仍然有效。
+     *
+     * 判定顺序很关键：
+     * 1) 先只看标题（message.text）。标题写了「签到失败」就是失败，
+     *    哪怕正文里含有「上次有效结果：签到成功」这类历史信息；
+     * 2) 标题没写明确状态时，再看全文里失败词与成功词谁先出现，
+     *    先出现的算数；同位置时按失败处理（预警宁可多提醒）。
+     *
+     * 早期的实现对"标题+正文"整段做 contains("成功")，会被正文里的
+     * 「上次签到成功」误导，导致失败状态从未建立、也没有提醒。
      */
     private fun updateFailureState(message: Message) {
+        val title = message.text.orEmpty()
+        val body = message.desp.orEmpty()
         val raw = listOfNotNull(message.text, message.desp)
             .joinToString(" ")
             .trim()
         if (raw.isEmpty()) return
 
-        if (raw.contains(SUCCESS_KEYWORD)) {
-            clearFailureState()
-            return
-        }
-        if (FAILURE_KEYWORDS.none { raw.contains(it) }) return
+        val titleHasFailure = FAILURE_KEYWORDS.any { title.contains(it) }
+        val titleHasSuccess = title.contains(SUCCESS_KEYWORD)
 
+        when {
+            titleHasFailure -> {
+                enterFailureState(raw)
+                return
+            }
+            titleHasSuccess -> {
+                clearFailureState()
+                return
+            }
+        }
+
+        val failIdx = indexOfFirstKeyword(raw, FAILURE_KEYWORDS)
+        val successIdx = raw.indexOf(SUCCESS_KEYWORD)
+        if (failIdx < 0 && successIdx < 0) return
+
+        val failureWins = when {
+            failIdx >= 0 && successIdx < 0 -> true
+            failIdx < 0 && successIdx >= 0 -> false
+            else -> failIdx <= successIdx
+        }
+        if (failureWins) enterFailureState(raw) else clearFailureState()
+    }
+
+    private fun indexOfFirstKeyword(raw: String, keywords: List<String>): Int {
+        var best = -1
+        for (k in keywords) {
+            val i = raw.indexOf(k)
+            if (i >= 0 && (best < 0 || i < best)) best = i
+        }
+        return best
+    }
+
+    private fun enterFailureState(raw: String) {
         val now = System.currentTimeMillis()
         settingStore.failureSince = now
         // 触发的那条推送本身已经弹过通知，所以提醒计时从此刻开始
